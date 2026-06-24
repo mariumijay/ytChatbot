@@ -1,9 +1,8 @@
 from pipeline import build_multi_pipeline
 
 urls = [
-    "https://www.youtube.com/watch?v=H14bBuluwB8",
-    "https://www.youtube.com/watch?v=uVRoSVMkxJA"
-]
+    "https://www.youtube.com/watch?v=M8ICGx4p0lA",
+    "https://www.youtube.com/watch?v=YcGXViwXItM"]
 
 chain = build_multi_pipeline(urls)
 
