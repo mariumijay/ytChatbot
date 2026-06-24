@@ -46,3 +46,15 @@ db.sqlite3-journal
 cookies.txt
 *.pdf
 faiss_index/
+
+# FAISS indexes
+faiss_index_*/
+
+# Audio files
+*.mp3
+*.webm
+*.m4a
+
+# API keys
+*.env
+.env.*
