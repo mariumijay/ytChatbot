@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local vector indexes
+faiss_index/
+faiss_index_*/
+
+# Temp downloaded media
+*.mp3
+*.webm
+*.m4a
+
+# PDF files
+*.pdf
+
+# Environment files
+.env
+.env.*
+
+# Auth/cookies
+cookies.txt

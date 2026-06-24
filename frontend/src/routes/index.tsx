@@ -2,15 +2,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   Mic, Send, Github, Sparkles, Zap, Brain, Podcast, Plus,
-  Check, Loader2, X, Bot, ArrowRight, Play,
+  Check, Loader2, X, Bot, ArrowRight, Play, Link,
 } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "PodcastGPT — Chat with any podcast, instantly" },
-      { name: "description", content: "Paste a YouTube podcast URL and chat with it instantly." },
+      { title: "YouTubeChat AI" },
+      { name: "description", content: "Turn any YouTube video into an AI you can talk to." },
     ],
   }),
   component: App,
@@ -18,15 +18,12 @@ export const Route = createFileRoute("/")({
 
 type View = "landing" | "loading" | "chat";
 type Msg = { id: string; role: "user" | "bot"; text: string; time: string };
+type VideoInfo = { video_id: string; url: string; title: string; video_ids?: string[]; titles?: string[] };
+
+const API_URL = "http://localhost:8000";
 
 const nowTime = () =>
   new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-const SAMPLE_SESSIONS = [
-  { title: "Lex Fridman × Sam Altman", date: "2d ago", count: 14 },
-  { title: "Huberman Lab — Sleep Optimization", date: "5d ago", count: 8 },
-  { title: "The Tim Ferriss Show — Naval Ravikant", date: "1w ago", count: 22 },
-];
 
 const SUGGESTIONS = [
   "What is this podcast about?",
@@ -34,38 +31,99 @@ const SUGGESTIONS = [
   "Summarize in 3 points",
 ];
 
+// ─── API Functions ───────────────────────────────────────────
+
+const loadVideo = async (url: string) => {
+  const response = await fetch(`${API_URL}/load`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Failed to load video");
+  }
+  return await response.json();
+};
+
+const loadMultiVideo = async (urls: string[]) => {
+  const response = await fetch(`${API_URL}/load-multi`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Failed to load videos");
+  }
+  return await response.json();
+};
+
+const streamChat = async (
+  question: string,
+  onChunk: (chunk: string) => void
+) => {
+  const response = await fetch(`${API_URL}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Failed to get response");
+  }
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    onChunk(decoder.decode(value));
+  }
+};
+
+const resetSession = async () => {
+  await fetch(`${API_URL}/reset`, { method: "DELETE" });
+};
+
+// ─── App ─────────────────────────────────────────────────────
+
 function App() {
   const [view, setView] = useState<View>("landing");
-  const [url, setUrl] = useState("");
-  const [submittedUrl, setSubmittedUrl] = useState("");
+  const [urls, setUrls] = useState<string[]>([]);
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
 
-  const handleStart = () => {
-    if (!url.trim()) {
-      toast.error("Please paste a YouTube URL first");
-      return;
-    }
-    if (!/youtu\.?be/i.test(url)) {
-      toast.error("Could not fetch transcript. Try another URL.");
-      return;
-    }
-    setSubmittedUrl(url);
+  const handleStart = async (submittedUrls: string[]) => {
+    setUrls(submittedUrls);
     setView("loading");
   };
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
       {view === "landing" && (
-        <Landing url={url} setUrl={setUrl} onStart={handleStart} />
+        <Landing onStart={handleStart} />
       )}
       {view === "loading" && (
-        <Loading url={submittedUrl} onDone={() => setView("chat")} />
+        <Loading
+          urls={urls}
+          onDone={(info) => {
+            setVideoInfo(info);
+            setView("chat");
+          }}
+          onError={() => {
+            toast.error("Could not fetch transcript. Try another URL.");
+            setView("landing");
+          }}
+        />
       )}
       {view === "chat" && (
         <Chat
-          url={submittedUrl}
-          onNewVideo={() => {
+          urls={urls}
+          videoInfo={videoInfo}
+          onNewVideo={async () => {
+            await resetSession();
             setView("landing");
-            setUrl("");
+            setUrls([]);
+            setVideoInfo(null);
           }}
         />
       )}
@@ -74,9 +132,50 @@ function App() {
 }
 
 /* ---------------- LANDING ---------------- */
-function Landing({
-  url, setUrl, onStart,
-}: { url: string; setUrl: (v: string) => void; onStart: () => void }) {
+function Landing({ onStart }: { onStart: (urls: string[]) => void }) {
+  const [input, setInput] = useState("");
+  const [urlList, setUrlList] = useState<string[]>([]);
+
+  const isValidYouTube = (url: string) => /youtu\.?be/i.test(url);
+
+  const addUrl = () => {
+    if (!input.trim()) {
+      toast.error("Please paste a YouTube URL first");
+      return;
+    }
+    if (!isValidYouTube(input)) {
+      toast.error("Please enter a valid YouTube URL");
+      return;
+    }
+    if (urlList.includes(input.trim())) {
+      toast.error("This URL is already added");
+      return;
+    }
+    if (urlList.length >= 5) {
+      toast.error("Maximum 5 URLs allowed");
+      return;
+    }
+    setUrlList((prev) => [...prev, input.trim()]);
+    setInput("");
+  };
+
+  const removeUrl = (index: number) => {
+    setUrlList((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleStart = () => {
+    const allUrls = urlList.length > 0 ? urlList : input.trim() ? [input.trim()] : [];
+    if (allUrls.length === 0) {
+      toast.error("Please paste at least one YouTube URL");
+      return;
+    }
+    if (!allUrls.every(isValidYouTube)) {
+      toast.error("Please enter valid YouTube URLs");
+      return;
+    }
+    onStart(allUrls);
+  };
+
   return (
     <div className="min-h-screen flex flex-col animate-fade-in-up">
       <nav className="flex items-center justify-between px-8 py-6 max-w-7xl mx-auto w-full">
@@ -84,10 +183,13 @@ function Landing({
           <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center">
             <Podcast className="w-4 h-4 text-primary-foreground" />
           </div>
-          <span className="font-bold text-lg tracking-tight">PodcastGPT</span>
+          <div className="flex flex-col leading-tight">
+            <span className="font-bold text-lg tracking-tight">YouTubeChat AI</span>
+            <span className="text-[10px] text-muted-foreground">Chat with any YouTube video, instantly</span>
+          </div>
         </div>
         <a
-          href="https://github.com"
+          href="https://github.com/mariumijay/ytChatbot"
           target="_blank" rel="noreferrer"
           className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
@@ -103,11 +205,11 @@ function Landing({
         <div className="relative z-10 max-w-3xl w-full text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface border border-border text-xs text-muted-foreground mb-8">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            Powered by Gemini AI
+            Powered by Groq AI
           </div>
 
           <h1 className="text-5xl md:text-6xl font-bold tracking-tight mb-5 leading-[1.05]">
-            Chat with any podcast,<br />
+            Chat with any YouTube video,<br />
             <span className="bg-gradient-to-r from-primary to-primary-glow bg-clip-text text-transparent">
               instantly
             </span>
@@ -117,28 +219,75 @@ function Landing({
             scrubbing. Just answers.
           </p>
 
-          <div className="glass-card rounded-2xl p-2 flex flex-col sm:flex-row gap-2 mb-12 max-w-2xl mx-auto">
-            <div className="flex items-center gap-3 flex-1 px-4">
-              <Play className="w-4 h-4 text-muted-foreground shrink-0" />
-              <input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && onStart()}
-                placeholder="Paste YouTube podcast URL here..."
-                className="flex-1 bg-transparent py-3 outline-none text-sm placeholder:text-muted-foreground"
-              />
+          {/* URL Input */}
+          <div className="glass-card rounded-2xl p-2 flex flex-col gap-2 mb-4 max-w-2xl mx-auto">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 flex-1 px-4">
+                <Play className="w-4 h-4 text-muted-foreground shrink-0" />
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      if (urlList.length > 0) addUrl();
+                      else handleStart();
+                    }
+                  }}
+                  placeholder="Paste any YouTube video URL here..."
+                  className="flex-1 bg-transparent py-3 outline-none text-sm placeholder:text-muted-foreground"
+                />
+              </div>
+              {/* Add URL button */}
+              <button
+                onClick={addUrl}
+                title="Add another URL"
+                className="w-10 h-10 rounded-xl border border-border hover:border-primary hover:text-primary flex items-center justify-center transition-colors shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+              {/* Start button */}
+              <button
+                onClick={handleStart}
+                className="bg-primary hover:bg-primary-glow transition-colors text-primary-foreground font-medium px-5 py-3 rounded-xl flex items-center justify-center gap-2 text-sm shrink-0"
+              >
+                Start Chatting <ArrowRight className="w-4 h-4" />
+              </button>
             </div>
-            <button
-              onClick={onStart}
-              className="bg-primary hover:bg-primary-glow transition-colors text-primary-foreground font-medium px-5 py-3 rounded-xl flex items-center justify-center gap-2 text-sm"
-            >
-              Start Chatting <ArrowRight className="w-4 h-4" />
-            </button>
+
+            {/* Added URLs list */}
+            {urlList.length > 0 && (
+              <div className="px-3 pb-2 flex flex-col gap-2">
+                <p className="text-[10px] text-muted-foreground text-left uppercase tracking-wider">
+                  {urlList.length} video{urlList.length > 1 ? "s" : ""} added
+                </p>
+                {urlList.map((u, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 bg-background border border-border rounded-xl px-3 py-2"
+                  >
+                    <Link className="w-3 h-3 text-primary shrink-0" />
+                    <span className="text-xs text-muted-foreground flex-1 truncate text-left">
+                      {u}
+                    </span>
+                    <button
+                      onClick={() => removeUrl(i)}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
+          <p className="text-[11px] text-muted-foreground mb-10">
+            Add up to 5 YouTube video URLs to chat across multiple videos at once
+          </p>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
-            <Feature icon={<Mic className="w-5 h-5" />} title="Any Podcast"
-              desc="Works with any YouTube podcast or long video" />
+            <Feature icon={<Mic className="w-5 h-5" />} title="Any Video"
+              desc="Works with any YouTube video — lectures, podcasts, vlogs, interviews" />
             <Feature icon={<Zap className="w-5 h-5" />} title="Instant Answers"
               desc="Get answers without rewatching hours of content" />
             <Feature icon={<Brain className="w-5 h-5" />} title="Smart Context"
@@ -147,9 +296,7 @@ function Landing({
         </div>
       </main>
 
-      <footer className="text-center py-8 text-xs text-muted-foreground">
-        Built with LangChain + Gemini + FAISS
-      </footer>
+      <footer className="py-8" />
     </div>
   );
 }
@@ -167,20 +314,59 @@ function Feature({ icon, title, desc }: { icon: React.ReactNode; title: string; 
 }
 
 /* ---------------- LOADING ---------------- */
-function Loading({ url, onDone }: { url: string; onDone: () => void }) {
+function Loading({
+  urls, onDone, onError,
+}: {
+  urls: string[];
+  onDone: (info: VideoInfo) => void;
+  onError: () => void;
+}) {
   const steps = ["Fetching transcript...", "Building knowledge base...", "Ready to chat!"];
   const [done, setDone] = useState(0);
+  const calledRef = useRef(false);
 
   useEffect(() => {
-    const timers = steps.map((_, i) =>
-      setTimeout(() => setDone((d) => Math.max(d, i + 1)), 1300 * (i + 1)),
-    );
-    const finish = setTimeout(onDone, 4000);
-    return () => {
-      timers.forEach(clearTimeout);
-      clearTimeout(finish);
+    if (calledRef.current) return;
+    calledRef.current = true;
+
+    const runLoad = async () => {
+      try {
+        setDone(1);
+        let result;
+
+        if (urls.length === 1) {
+          result = await loadVideo(urls[0]);
+          setDone(2);
+          await new Promise((r) => setTimeout(r, 800));
+          setDone(3);
+          await new Promise((r) => setTimeout(r, 600));
+          onDone({
+            video_id: result.video_id,
+            url: result.url,
+            title: result.title,
+          });
+        } else {
+          result = await loadMultiVideo(urls);
+          setDone(2);
+          await new Promise((r) => setTimeout(r, 800));
+          setDone(3);
+          await new Promise((r) => setTimeout(r, 600));
+          onDone({
+            video_id: result.video_ids[0],
+            url: result.urls[0],
+            title: `${result.titles.length} videos loaded`,
+            video_ids: result.video_ids,
+            titles: result.titles,
+          });
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Failed to load video");
+        onError();
+      }
     };
-  }, [onDone]);
+
+    runLoad();
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center px-6 relative overflow-hidden animate-fade-in-up">
@@ -189,8 +375,13 @@ function Loading({ url, onDone }: { url: string; onDone: () => void }) {
       </div>
 
       <div className="relative z-10 max-w-lg w-full text-center">
-        <div className="bg-surface border border-border rounded-xl px-4 py-3 text-xs text-muted-foreground truncate mb-10 mx-auto max-w-md">
-          {url}
+        {/* Show all URLs */}
+        <div className="flex flex-col gap-1 mb-10">
+          {urls.map((u, i) => (
+            <div key={i} className="bg-surface border border-border rounded-xl px-4 py-2 text-xs text-muted-foreground truncate mx-auto max-w-md w-full">
+              {u}
+            </div>
+          ))}
         </div>
 
         <div className="flex justify-center mb-10">
@@ -207,11 +398,10 @@ function Loading({ url, onDone }: { url: string; onDone: () => void }) {
             return (
               <div
                 key={s}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
-                  complete || active
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${complete || active
                     ? "bg-surface border-border"
                     : "bg-surface/40 border-border/50 opacity-50"
-                }`}
+                  }`}
               >
                 <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0">
                   {complete ? (
@@ -237,31 +427,60 @@ function Loading({ url, onDone }: { url: string; onDone: () => void }) {
 }
 
 /* ---------------- CHAT ---------------- */
-function Chat({ url, onNewVideo }: { url: string; onNewVideo: () => void }) {
+function Chat({
+  urls, videoInfo, onNewVideo,
+}: {
+  urls: string[];
+  videoInfo: VideoInfo | null;
+  onNewVideo: () => void;
+}) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
-  const [activeSession, setActiveSession] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const isMulti = urls.length > 1;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, thinking]);
 
-  const send = (text?: string) => {
+  const send = async (text?: string) => {
     const content = (text ?? input).trim();
-    if (!content) return;
-    const userMsg: Msg = { id: crypto.randomUUID(), role: "user", text: content, time: nowTime() };
+    if (!content || thinking) return;
+
+    const userMsg: Msg = {
+      id: crypto.randomUUID(),
+      role: "user",
+      text: content,
+      time: nowTime(),
+    };
     setMessages((m) => [...m, userMsg]);
     setInput("");
     setThinking(true);
-    setTimeout(() => {
+
+    const botId = crypto.randomUUID();
+    setMessages((m) => [...m, {
+      id: botId,
+      role: "bot",
+      text: "",
+      time: nowTime(),
+    }]);
+
+    try {
+      await streamChat(content, (chunk) => {
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === botId ? { ...msg, text: msg.text + chunk } : msg
+          )
+        );
+      });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to get response");
+      setMessages((m) => m.filter((msg) => msg.id !== botId));
+    } finally {
       setThinking(false);
-      setMessages((m) => [...m, {
-        id: crypto.randomUUID(), role: "bot", time: nowTime(),
-        text: `Great question. Based on the transcript, here's what stood out: the host and guest explore this idea around the 24-minute mark — they argue that consistent compounding beats intensity, and back it up with two concrete examples from the guest's career.`,
-      }]);
-    }, 1500);
+    }
   };
 
   return (
@@ -272,19 +491,51 @@ function Chat({ url, onNewVideo }: { url: string; onNewVideo: () => void }) {
           <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center">
             <Podcast className="w-4 h-4 text-primary-foreground" />
           </div>
-          <span className="font-bold tracking-tight">PodcastGPT</span>
+          <span className="font-bold tracking-tight">YouTube AI</span>
         </div>
 
         <div className="p-4 border-b border-border">
-          <div className="aspect-video rounded-xl bg-gradient-to-br from-primary/30 to-primary/5 border border-border mb-3 flex items-center justify-center">
-            <Play className="w-8 h-8 text-primary/80" fill="currentColor" />
-          </div>
-          <h3 className="text-sm font-medium leading-snug line-clamp-2 mb-2">
-            The Future of AI Agents — A Conversation on Autonomy
-          </h3>
-          <span className="inline-block text-[10px] px-2 py-0.5 rounded-md bg-background border border-border text-muted-foreground">
-            1h 24m
-          </span>
+          {isMulti ? (
+            /* Multi video view */
+            <div className="flex flex-col gap-2">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                {urls.length} Videos Loaded
+              </p>
+              {(videoInfo?.video_ids ?? [videoInfo?.video_id ?? ""]).map((vid, i) => (
+                <div key={vid} className="flex items-center gap-2 bg-background border border-border rounded-xl p-2">
+                  <img
+                    src={`https://img.youtube.com/vi/${vid}/default.jpg`}
+                    alt="thumbnail"
+                    className="w-12 h-8 object-cover rounded-lg shrink-0"
+                  />
+                  <p className="text-[10px] text-muted-foreground line-clamp-2">
+                    {videoInfo?.titles?.[i] ?? vid}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Single video view */
+            <>
+              <div className="aspect-video rounded-xl bg-gradient-to-br from-primary/30 to-primary/5 border border-border mb-3 flex items-center justify-center overflow-hidden">
+                {videoInfo?.video_id ? (
+                  <img
+                    src={`https://img.youtube.com/vi/${videoInfo.video_id}/mqdefault.jpg`}
+                    alt="thumbnail"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <Play className="w-8 h-8 text-primary/80" fill="currentColor" />
+                )}
+              </div>
+              <h3 className="text-sm font-medium leading-snug line-clamp-2 mb-2">
+                {videoInfo?.title ?? "Loaded Video"}
+              </h3>
+              <span className="inline-block text-[10px] px-2 py-0.5 rounded-md bg-background border border-border text-muted-foreground">
+                {urls[0]?.slice(0, 30)}...
+              </span>
+            </>
+          )}
         </div>
 
         <div className="p-4 border-b border-border">
@@ -298,28 +549,15 @@ function Chat({ url, onNewVideo }: { url: string; onNewVideo: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-4">
           <h4 className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3 font-semibold">
-            Recent Sessions
+            Current Session
           </h4>
-          <div className="space-y-2">
-            {SAMPLE_SESSIONS.map((s, i) => (
-              <button
-                key={s.title}
-                onClick={() => setActiveSession(i)}
-                className={`w-full text-left p-3 rounded-xl border transition-colors relative ${
-                  activeSession === i
-                    ? "bg-background border-border"
-                    : "bg-transparent border-transparent hover:bg-background"
-                }`}
-              >
-                {activeSession === i && (
-                  <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-primary" />
-                )}
-                <p className="text-xs font-medium line-clamp-1 mb-1">{s.title}</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {s.date} · {s.count} messages
-                </p>
-              </button>
-            ))}
+          <div className="p-3 rounded-xl border border-primary/30 bg-background">
+            <p className="text-xs font-medium line-clamp-1 mb-1">
+              {isMulti ? `${urls.length} videos` : videoInfo?.title ?? "Current Video"}
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              {messages.filter(m => m.role === "user").length} messages
+            </p>
           </div>
         </div>
       </aside>
@@ -329,7 +567,9 @@ function Chat({ url, onNewVideo }: { url: string; onNewVideo: () => void }) {
         <header className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Chatting with</p>
-            <h2 className="text-sm font-semibold truncate">The Future of AI Agents — A Conversation on Autonomy</h2>
+            <h2 className="text-sm font-semibold truncate">
+              {isMulti ? `${urls.length} videos` : videoInfo?.title ?? urls[0]}
+            </h2>
           </div>
           <button
             onClick={() => setMessages([])}
@@ -346,7 +586,7 @@ function Chat({ url, onNewVideo }: { url: string; onNewVideo: () => void }) {
                 <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center mb-5">
                   <Mic className="w-7 h-7 text-primary" />
                 </div>
-                <h3 className="text-xl font-semibold mb-2">Ask anything about this podcast</h3>
+                <h3 className="text-xl font-semibold mb-2">Ask anything about {isMulti ? "these videos" : "this video"}</h3>
                 <p className="text-sm text-muted-foreground mb-8">Try one of these to get started</p>
                 <div className="flex flex-wrap justify-center gap-2">
                   {SUGGESTIONS.map((q) => (
@@ -358,6 +598,14 @@ function Chat({ url, onNewVideo }: { url: string; onNewVideo: () => void }) {
                       {q}
                     </button>
                   ))}
+                  {isMulti && (
+                    <button
+                      onClick={() => send("What are the differences between these videos?")}
+                      className="px-4 py-2 rounded-full bg-surface border border-border text-sm hover:border-primary hover:text-primary transition-colors"
+                    >
+                      Compare all videos
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
@@ -365,7 +613,9 @@ function Chat({ url, onNewVideo }: { url: string; onNewVideo: () => void }) {
                 {messages.map((m) => (
                   <MessageBubble key={m.id} msg={m} />
                 ))}
-                {thinking && <ThinkingBubble />}
+                {thinking && messages[messages.length - 1]?.role !== "bot" && (
+                  <ThinkingBubble />
+                )}
               </div>
             )}
           </div>
@@ -378,19 +628,24 @@ function Chat({ url, onNewVideo }: { url: string; onNewVideo: () => void }) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && send()}
-                placeholder="Ask anything about this podcast..."
+                placeholder={`Ask anything about ${isMulti ? "these videos" : "this video"}...`}
                 className="flex-1 bg-transparent outline-none text-sm py-2 placeholder:text-muted-foreground"
+                disabled={thinking}
               />
               <button
                 onClick={() => send()}
-                disabled={!input.trim()}
+                disabled={!input.trim() || thinking}
                 className="w-9 h-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary-glow disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                <Send className="w-4 h-4" />
+                {thinking ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
               </button>
             </div>
             <p className="text-[10px] text-muted-foreground text-center mt-2 flex items-center justify-center gap-1.5">
-              <Sparkles className="w-3 h-3" /> Powered by Gemini AI
+              <Sparkles className="w-3 h-3" /> Powered by Groq AI
             </p>
           </div>
         </div>
@@ -416,8 +671,8 @@ function MessageBubble({ msg }: { msg: Msg }) {
         <Bot className="w-4 h-4 text-primary" />
       </div>
       <div className="flex flex-col items-start max-w-[80%]">
-        <div className="bg-surface border border-border rounded-2xl rounded-tl-md px-4 py-3 text-sm leading-relaxed text-foreground">
-          {msg.text}
+        <div className="bg-surface border border-border rounded-2xl rounded-tl-md px-4 py-3 text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+          {msg.text || <Loader2 className="w-4 h-4 animate-spin text-primary" />}
         </div>
         <span className="text-[10px] text-muted-foreground mt-1.5 ml-1">{msg.time}</span>
       </div>

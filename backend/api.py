@@ -1,5 +1,6 @@
 import os
 import asyncio
+import yt_dlp
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -27,6 +28,7 @@ session = {
     "chain": None,
     "urls": [],
     "video_ids": [],
+    "titles": [],
     "chat_history": []
 }
 
@@ -39,6 +41,17 @@ class LoadMultiRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
+
+# ─── Helper ──────────────────────────────────────────────────
+
+def get_video_title(url: str) -> str:
+    """Fetch video title using yt-dlp."""
+    try:
+        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return info.get('title', 'Unknown Video')
+    except:
+        return 'Unknown Video'
 
 # ─── Endpoints ───────────────────────────────────────────────
 
@@ -55,6 +68,7 @@ def status():
         "loaded": len(session["urls"]) > 0,
         "urls": session["urls"],
         "video_ids": session["video_ids"],
+        "titles": session["titles"],
         "message_count": len(session["chat_history"])
     }
 
@@ -65,19 +79,25 @@ def load_video(request: LoadRequest):
     try:
         video_id = get_video_id(request.url)
 
-        print(f"Loading video: {video_id}")
+        # Get video title
+        print(f"Fetching title for {video_id}...")
+        title = get_video_title(request.url)
+
+        print(f"Loading video: {video_id} - {title}")
         chain = build_pipeline(request.url)
 
         # Update session
         session["chain"] = chain
         session["urls"] = [request.url]
         session["video_ids"] = [video_id]
+        session["titles"] = [title]
         session["chat_history"] = []
 
         return {
             "success": True,
-            "message": f"Video loaded successfully",
+            "message": "Video loaded successfully",
             "video_id": video_id,
+            "title": title,
             "url": request.url
         }
 
@@ -98,23 +118,27 @@ def load_multiple_videos(request: LoadMultiRequest):
         print(f"Loading {len(request.urls)} videos...")
         chain = build_multi_pipeline(request.urls)
 
-        # Update session
+        # Get video IDs and titles
         video_ids = []
+        titles = []
         for url in request.urls:
             try:
                 video_ids.append(get_video_id(url))
             except:
                 video_ids.append("unknown")
+            titles.append(get_video_title(url))
 
         session["chain"] = chain
         session["urls"] = request.urls
         session["video_ids"] = video_ids
+        session["titles"] = titles
         session["chat_history"] = []
 
         return {
             "success": True,
             "message": f"{len(request.urls)} videos loaded successfully",
             "video_ids": video_ids,
+            "titles": titles,
             "urls": request.urls
         }
 
@@ -139,7 +163,7 @@ async def chat(request: ChatRequest):
     async def stream_response():
         try:
             # Format chat history
-            history_text = "\n".join(session["chat_history"][-10:])  # last 5 exchanges
+            history_text = "\n".join(session["chat_history"][-10:])
 
             # Stream response
             full_response = ""
@@ -169,6 +193,7 @@ def reset_session():
     session["chain"] = None
     session["urls"] = []
     session["video_ids"] = []
+    session["titles"] = []
     session["chat_history"] = []
 
     return {
