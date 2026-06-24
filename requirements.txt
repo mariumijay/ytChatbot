@@ -1,0 +1,26 @@
+# YouTube Chatbot (ytChatbot) - Requirements
+# Python 3.9+ required
+
+# LangChain core
+langchain
+langchain-community
+langchain-core
+
+# Google Generative AI integration
+langchain-google-genai
+google-generativeai
+
+# Vector store
+faiss-cpu
+
+# PDF loading
+pypdf
+
+# Audio transcription (YouTube audio parsing)
+openai-whisper
+
+# YouTube audio downloading
+yt-dlp
+
+# Environment variable management
+python-dotenv

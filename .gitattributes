@@ -1,0 +1,26 @@
+# Set default behavior to automatically normalize line endings.
+* text=auto
+
+# Force standard text files to use LF line endings in the repository.
+*.py text eol=lf
+*.ipynb text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.env text eol=lf
+requirements.txt text eol=lf
+
+# Force Windows batch scripts to use CRLF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Treat binary files explicitly as binary (no line ending conversion).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.ico binary
+*.zip binary
+*.tar.gz binary
+*.db binary
