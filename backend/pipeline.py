@@ -165,11 +165,10 @@ def build_hybrid_retriever(chunks, vector_store):
 def build_chain(retriever):
     """Build the RAG chain with chat history."""
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL"),
         temperature=0.3,
         api_key=os.getenv("GROQ_API_KEY")
     )
-
     prompt = PromptTemplate(
         template="""
         You are a helpful assistant that answers questions about YouTube podcast videos.
