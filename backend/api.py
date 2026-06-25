@@ -8,16 +8,6 @@ from pydantic import BaseModel
 from typing import List, Optional
 from backend.pipeline import build_pipeline, build_multi_pipeline, get_video_id
 
-# Write cookies from env var at startup
-COOKIES_PATH = "/tmp/cookies.txt"
-_cookies_content = os.getenv("YOUTUBE_COOKIES")
-if _cookies_content:
-    with open(COOKIES_PATH, "w") as f:
-        f.write(_cookies_content)
-    print(f"✅ cookies.txt written to {COOKIES_PATH}")
-else:
-    print("⚠️ YOUTUBE_COOKIES env var not found")
-
 app = FastAPI(
     title="NinjaPrep AI API",
     description="Chat with any YouTube video, generate MCQs and study notes",
@@ -55,14 +45,18 @@ class ChatRequest(BaseModel):
 # ─── Helper ──────────────────────────────────────────────────
 
 def get_video_title(url: str) -> str:
+    """Get video title using yt-dlp (no cookies needed for metadata)."""
     try:
-        opts = {'quiet': True}
-        if os.path.exists('/tmp/cookies.txt'):
-            opts['cookiefile'] = '/tmp/cookies.txt'
+        opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'skip_download': True
+        }
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return info.get('title', 'Unknown Video')
-    except:
+    except Exception as e:
+        print(f"Title fetch failed: {e}")
         return 'Unknown Video'
 
 # ─── Endpoints ───────────────────────────────────────────────
@@ -71,7 +65,6 @@ def get_video_title(url: str) -> str:
 def health():
     """Check if API is running."""
     return {"status": "ok", "message": "NinjaPrep AI API is running"}
-
 
 @app.get("/status")
 def status():
@@ -83,7 +76,6 @@ def status():
         "titles": session["titles"],
         "message_count": len(session["chat_history"])
     }
-
 
 @app.post("/load")
 def load_video(request: LoadRequest):
@@ -113,7 +105,6 @@ def load_video(request: LoadRequest):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @app.post("/load-multi")
 def load_multiple_videos(request: LoadMultiRequest):
@@ -156,7 +147,6 @@ def load_multiple_videos(request: LoadMultiRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """Chat with loaded videos — streams response."""
@@ -192,7 +182,6 @@ async def chat(request: ChatRequest):
         media_type="text/plain"
     )
 
-
 @app.post("/notes")
 async def generate_notes():
     """Generate structured study notes from loaded video."""
@@ -206,24 +195,24 @@ async def generate_notes():
         try:
             async for chunk in session["chain"].astream({
                 "question": """Generate comprehensive structured study notes from this lecture.
-                Format the notes as follows:
-                
-                # [Topic Title]
-                
-                ## Key Concepts
-                - List all main concepts covered
-                
-                ## Detailed Notes
-                - Cover each topic in detail
-                - Include definitions, formulas, and examples
-                
-                ## Important Points to Remember
-                - List the most important points for exam
-                
-                ## Summary
-                - Brief summary of the entire lecture
-                
-                Make the notes detailed, clear and exam-focused.""",
+Format the notes as follows:
+
+# [Topic Title]
+
+## Key Concepts
+- List all main concepts covered
+
+## Detailed Notes
+- Cover each topic in detail
+- Include definitions, formulas, and examples
+
+## Important Points to Remember
+- List the most important points for exam
+
+## Summary
+- Brief summary of the entire lecture
+
+Make the notes detailed, clear and exam-focused.""",
                 "chat_history": ""
             }):
                 yield chunk
@@ -235,7 +224,6 @@ async def generate_notes():
         stream_notes(),
         media_type="text/plain"
     )
-
 
 @app.post("/mcq")
 async def generate_mcq():
@@ -252,29 +240,29 @@ async def generate_mcq():
             async for chunk in session["chain"].astream({
                 "question": """Generate exactly 10 multiple choice questions from this lecture.
 
-                Return ONLY a valid JSON array, no other text, no markdown, in this exact format:
-                [
-                  {
-                    "id": 1,
-                    "question": "Question text here?",
-                    "options": {
-                      "A": "First option",
-                      "B": "Second option",
-                      "C": "Third option",
-                      "D": "Fourth option"
-                    },
-                    "correct": "A",
-                    "explanation": "Brief explanation why A is correct"
-                  }
-                ]
+Return ONLY a valid JSON array, no other text, no markdown, in this exact format:
+[
+  {
+    "id": 1,
+    "question": "Question text here?",
+    "options": {
+      "A": "First option",
+      "B": "Second option",
+      "C": "Third option",
+      "D": "Fourth option"
+    },
+    "correct": "A",
+    "explanation": "Brief explanation why A is correct"
+  }
+]
 
-                Rules:
-                - Questions must be based ONLY on the video content
-                - Each question must have exactly 4 options (A, B, C, D)
-                - Make questions exam-level difficulty
-                - Include explanation for correct answer
-                - Return ONLY the JSON array, no markdown, no extra text
-                - Do NOT wrap in code blocks""",
+Rules:
+- Questions must be based ONLY on the video content
+- Each question must have exactly 4 options (A, B, C, D)
+- Make questions exam-level difficulty
+- Include explanation for correct answer
+- Return ONLY the JSON array, no markdown, no extra text
+- Do NOT wrap in code blocks""",
                 "chat_history": ""
             }):
                 full_response += chunk
@@ -287,7 +275,6 @@ async def generate_mcq():
         stream_mcq(),
         media_type="text/plain"
     )
-
 
 @app.post("/flashcards")
 async def generate_flashcards():
@@ -303,22 +290,22 @@ async def generate_flashcards():
             async for chunk in session["chain"].astream({
                 "question": """Generate exactly 15 flashcards from this lecture.
 
-                Return ONLY a valid JSON array, no other text, no markdown, in this exact format:
-                [
-                  {
-                    "id": 1,
-                    "front": "Question or term on front of card",
-                    "back": "Answer or definition on back of card"
-                  }
-                ]
+Return ONLY a valid JSON array, no other text, no markdown, in this exact format:
+[
+  {
+    "id": 1,
+    "front": "Question or term on front of card",
+    "back": "Answer or definition on back of card"
+  }
+]
 
-                Rules:
-                - Flashcards must be based ONLY on the video content
-                - Front should be a question or key term
-                - Back should be the answer or definition
-                - Make them useful for exam revision
-                - Return ONLY the JSON array, no markdown, no extra text
-                - Do NOT wrap in code blocks""",
+Rules:
+- Flashcards must be based ONLY on the video content
+- Front should be a question or key term
+- Back should be the answer or definition
+- Make them useful for exam revision
+- Return ONLY the JSON array, no markdown, no extra text
+- Do NOT wrap in code blocks""",
                 "chat_history": ""
             }):
                 yield chunk
@@ -330,7 +317,6 @@ async def generate_flashcards():
         stream_flashcards(),
         media_type="text/plain"
     )
-
 
 @app.delete("/reset")
 def reset_session():
@@ -345,7 +331,6 @@ def reset_session():
         "success": True,
         "message": "Session cleared successfully"
     }
-
 
 # ─── Run ─────────────────────────────────────────────────────
 if __name__ == "__main__":
