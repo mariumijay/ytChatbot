@@ -71,19 +71,28 @@ def get_transcript_groq_whisper(video_id):
     print(f"Transcription done for {video_id}")
     return transcription.text
 
-
 def get_transcript(video_id):
-    """Fetch transcript — fallback to Groq Whisper if no captions."""
-    session = requests.Session()
-    cookies = http.cookiejar.MozillaCookieJar("cookies.txt")
-    cookies.load()
-    session.cookies = cookies
-    ytt = YouTubeTranscriptApi(http_client=session)
-
+    """Fetch transcript — no cookies needed."""
     try:
+        # Try without cookies first (works for most videos)
+        ytt = YouTubeTranscriptApi()
         return " ".join(chunk.text for chunk in ytt.fetch(video_id))
     except Exception:
         try:
+            # Try with cookies if available
+            if os.path.exists("cookies.txt"):
+                session = requests.Session()
+                cookies = http.cookiejar.MozillaCookieJar("cookies.txt")
+                cookies.load()
+                session.cookies = cookies
+                ytt = YouTubeTranscriptApi(http_client=session)
+                return " ".join(chunk.text for chunk in ytt.fetch(video_id))
+        except Exception:
+            pass
+
+        try:
+            # Try any available language
+            ytt = YouTubeTranscriptApi()
             transcript_list = ytt.list(video_id)
             for transcript in transcript_list:
                 try:
@@ -93,9 +102,9 @@ def get_transcript(video_id):
         except Exception:
             pass
 
-        print(f"No captions found for {video_id} — falling back to Groq Whisper...")
+        # Final fallback — Groq Whisper
+        print(f"No captions found — falling back to Groq Whisper...")
         return get_transcript_groq_whisper(video_id)
-
 
 def build_vector_store(transcript, url, video_id):
     """Chunk transcript and build FAISS vector store."""

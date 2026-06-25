@@ -29,7 +29,7 @@ type MCQ = {
 };
 type Flashcard = { id: number; front: string; back: string };
 
-const API_URL = "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const SUGGESTIONS = ["What is this video about?", "What are the key takeaways?", "Summarize in 3 points"];
 

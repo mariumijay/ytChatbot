@@ -169,7 +169,18 @@ Stream response to frontend
 
 ## 📸 Screenshots
 
-> Chat interface, MCQ quiz, and flashcards coming soon
+### Landing Page
+![Landing](screenshots/landing.png)
+
+### Chat Interface
+![Chat](screenshots/chat.png)
+
+### MCQ Quiz
+![Quiz](screenshots/quiz.png)
+
+### Flashcards
+![Flashcards](screenshots/flashcards.png)
+
 
 ---
 
