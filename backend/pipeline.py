@@ -57,7 +57,7 @@ def get_transcript_groq_whisper(video_id):
             'preferredcodec': 'mp3',
         }],
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
-        'cookiefile': 'cookies.txt',
+        'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
         'quiet': True
     }
 

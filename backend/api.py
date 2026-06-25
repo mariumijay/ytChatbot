@@ -44,9 +44,11 @@ class ChatRequest(BaseModel):
 # ─── Helper ──────────────────────────────────────────────────
 
 def get_video_title(url: str) -> str:
-    """Fetch video title using yt-dlp."""
     try:
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+        opts = {'quiet': True}
+        if os.path.exists('cookies.txt'):
+            opts['cookiefile'] = 'cookies.txt'
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return info.get('title', 'Unknown Video')
     except:
