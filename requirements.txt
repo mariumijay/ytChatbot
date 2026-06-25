@@ -1,4 +1,4 @@
-# YouTubeChat AI — Backend Dependencies
+# YouTubeChat AI â€” Backend Dependencies
 
 # Web framework
 fastapi
@@ -28,3 +28,4 @@ imageio-ffmpeg
 python-dotenv
 requests
 pydantic
+numpy>=2.1.0,<3
