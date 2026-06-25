@@ -9,11 +9,12 @@ from typing import List, Optional
 from backend.pipeline import build_pipeline, build_multi_pipeline, get_video_id
 
 # Write cookies from env var at startup
+COOKIES_PATH = "/tmp/cookies.txt"
 _cookies_content = os.getenv("YOUTUBE_COOKIES")
 if _cookies_content:
-    with open("cookies.txt", "w") as f:
+    with open(COOKIES_PATH, "w") as f:
         f.write(_cookies_content)
-    print("✅ cookies.txt written from YOUTUBE_COOKIES env var")
+    print(f"✅ cookies.txt written to {COOKIES_PATH}")
 else:
     print("⚠️ YOUTUBE_COOKIES env var not found")
 
@@ -56,8 +57,8 @@ class ChatRequest(BaseModel):
 def get_video_title(url: str) -> str:
     try:
         opts = {'quiet': True}
-        if os.path.exists('cookies.txt'):
-            opts['cookiefile'] = 'cookies.txt'
+        if os.path.exists('/tmp/cookies.txt'):
+            opts['cookiefile'] = '/tmp/cookies.txt'
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return info.get('title', 'Unknown Video')
