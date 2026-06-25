@@ -79,39 +79,28 @@ def get_transcript_groq_whisper(video_id):
     return transcription.text
 
 def get_transcript(video_id):
-    """Fetch transcript — no cookies needed."""
+    """Fetch transcript using YouTube Data API v3."""
     try:
-        # Try without cookies first (works for most videos)
+        # Try youtube-transcript-api first (free, no quota)
         ytt = YouTubeTranscriptApi()
         return " ".join(chunk.text for chunk in ytt.fetch(video_id))
-    except Exception:
-        try:
-            # Try with cookies if available
-            if os.path.exists("cookies.txt"):
-                session = requests.Session()
-                cookies = http.cookiejar.MozillaCookieJar("cookies.txt")
-                cookies.load()
-                session.cookies = cookies
-                ytt = YouTubeTranscriptApi(http_client=session)
-                return " ".join(chunk.text for chunk in ytt.fetch(video_id))
-        except Exception:
-            pass
-
-        try:
-            # Try any available language
-            ytt = YouTubeTranscriptApi()
-            transcript_list = ytt.list(video_id)
-            for transcript in transcript_list:
-                try:
-                    return " ".join(chunk.text for chunk in transcript.fetch())
-                except Exception:
-                    continue
-        except Exception:
-            pass
-
-        # Final fallback — Groq Whisper
-        print(f"No captions found — falling back to Groq Whisper...")
-        return get_transcript_groq_whisper(video_id)
+    except Exception as e:
+        print(f"Transcript API failed: {e}")
+    
+    try:
+        # Fallback: fetch via YouTube captions API
+        api_key = os.getenv("YOUTUBE_API_KEY")
+        if api_key:
+            url = f"https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId={video_id}&key={api_key}"
+            response = requests.get(url)
+            data = response.json()
+            print(f"Captions response: {data}")
+    except Exception as e:
+        print(f"YouTube API failed: {e}")
+    
+    # Final fallback
+    print("Falling back to Groq Whisper...")
+    return get_transcript_groq_whisper(video_id)
 
 def build_vector_store(transcript, url, video_id):
     """Chunk transcript and build FAISS vector store."""
