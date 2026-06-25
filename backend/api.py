@@ -6,8 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
-from .pipeline import build_pipeline, build_multi_pipeline, get_video_id
-
+from backend.pipeline import build_pipeline, build_multi_pipeline, get_video_id
 app = FastAPI(
     title="NinjaPrep AI API",
     description="Chat with any YouTube video, generate MCQs and study notes",
