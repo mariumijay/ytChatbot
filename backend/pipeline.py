@@ -27,13 +27,6 @@ os.environ["FFMPEG_BINARY"] = imageio_ffmpeg.get_ffmpeg_exe()
 
 load_dotenv()
 
-# Write cookies from env var to file (for Render deployment)
-_cookies_content = os.getenv("YOUTUBE_COOKIES")
-if _cookies_content and not os.path.exists("cookies.txt"):
-    with open("cookies.txt", "w") as f:
-        f.write(_cookies_content)
-    print("cookies.txt written from environment variable")
-
 def get_video_id(url):
     """Extract video ID from any YouTube URL format."""
     if "youtu.be" in url:
@@ -42,7 +35,6 @@ def get_video_id(url):
         return url.split("v=")[-1].split("&")[0]
     else:
         raise ValueError(f"Invalid YouTube URL: {url}")
-
 
 def get_transcript_groq_whisper(video_id):
     """Download audio and transcribe using Groq Whisper API."""
@@ -57,7 +49,6 @@ def get_transcript_groq_whisper(video_id):
             'preferredcodec': 'mp3',
         }],
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
-        'cookiefile': '/tmp/cookies.txt' if os.path.exists('/tmp/cookies.txt') else None,
         'quiet': True
     }
 
@@ -71,35 +62,16 @@ def get_transcript_groq_whisper(video_id):
         transcription = client.audio.transcriptions.create(
             file=(audio_file, f.read()),
             model="whisper-large-v3",
-            language="en"
+            response_format="text"
         )
 
     os.remove(audio_file)
     print(f"Transcription done for {video_id}")
-    return transcription.text
+    return transcription
 
 def get_transcript(video_id):
-    """Fetch transcript using YouTube Data API v3."""
-    try:
-        # Try youtube-transcript-api first (free, no quota)
-        ytt = YouTubeTranscriptApi()
-        return " ".join(chunk.text for chunk in ytt.fetch(video_id))
-    except Exception as e:
-        print(f"Transcript API failed: {e}")
-    
-    try:
-        # Fallback: fetch via YouTube captions API
-        api_key = os.getenv("YOUTUBE_API_KEY")
-        if api_key:
-            url = f"https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId={video_id}&key={api_key}"
-            response = requests.get(url)
-            data = response.json()
-            print(f"Captions response: {data}")
-    except Exception as e:
-        print(f"YouTube API failed: {e}")
-    
-    # Final fallback
-    print("Falling back to Groq Whisper...")
+    """Always use Groq Whisper for reliable transcription (supports 99 languages)."""
+    print(f"Fetching transcript for {video_id} via Groq Whisper...")
     return get_transcript_groq_whisper(video_id)
 
 def build_vector_store(transcript, url, video_id):
@@ -117,12 +89,10 @@ def build_vector_store(transcript, url, video_id):
     vector_store = FAISS.from_documents(chunks, embeddings)
     return vector_store
 
-
 def save_vector_store(vector_store, path="faiss_index"):
     """Save vector store to disk."""
     vector_store.save_local(path)
     print(f"Vector store saved to {path}")
-
 
 def load_vector_store(path="faiss_index"):
     """Load vector store from disk."""
@@ -130,7 +100,6 @@ def load_vector_store(path="faiss_index"):
     vector_store = FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True)
     print(f"Vector store loaded from {path}")
     return vector_store
-
 
 class HybridRetriever(BaseRetriever):
     """Hybrid retriever combining BM25 keyword + semantic search."""
@@ -154,7 +123,6 @@ class HybridRetriever(BaseRetriever):
 
         return combined[:8]
 
-
 def build_hybrid_retriever(chunks, vector_store):
     """Build a hybrid retriever combining semantic + keyword search."""
     semantic = vector_store.as_retriever(
@@ -166,7 +134,6 @@ def build_hybrid_retriever(chunks, vector_store):
 
     return HybridRetriever(bm25_retriever=bm25, semantic_retriever=semantic)
 
-
 def build_chain(retriever):
     """Build the RAG chain with chat history."""
     llm = ChatGroq(
@@ -176,19 +143,19 @@ def build_chain(retriever):
     )
     prompt = PromptTemplate(
         template="""
-        You are a helpful assistant that answers questions about YouTube podcast videos.
-        Answer ONLY from the provided transcript context.
-        If the context is insufficient, just say you don't know.
+You are a helpful assistant that answers questions about YouTube podcast videos.
+Answer ONLY from the provided transcript context.
+If the context is insufficient, just say you don't know.
 
-        Each chunk of context has a video_id in its metadata.
-        When comparing videos, reference them by their video_id.
+Each chunk of context has a video_id in its metadata.
+When comparing videos, reference them by their video_id.
 
-        Previous conversation:
-        {chat_history}
+Previous conversation:
+{chat_history}
 
-        Context: {context}
-        Question: {question}
-        """,
+Context: {context}
+Question: {question}
+""",
         input_variables=["context", "question", "chat_history"]
     )
 
@@ -206,9 +173,8 @@ def build_chain(retriever):
 
     return chain
 
-
 def build_pipeline(url):
-    """Single video pipeline: URL → chain ready to query."""
+    """Single video pipeline: URL -> chain ready to query."""
     video_id = get_video_id(url)
     index_path = f"faiss_index_{video_id}"
 
@@ -227,7 +193,6 @@ def build_pipeline(url):
     chain = build_chain(retriever)
     print("Pipeline ready!")
     return chain
-
 
 def build_multi_pipeline(urls):
     """Build a pipeline from multiple YouTube URLs."""
