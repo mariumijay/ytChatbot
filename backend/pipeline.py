@@ -27,6 +27,12 @@ os.environ["FFMPEG_BINARY"] = imageio_ffmpeg.get_ffmpeg_exe()
 
 load_dotenv()
 
+# Write cookies from env var to file (for Render deployment)
+_cookies_content = os.getenv("YOUTUBE_COOKIES")
+if _cookies_content and not os.path.exists("cookies.txt"):
+    with open("cookies.txt", "w") as f:
+        f.write(_cookies_content)
+    print("cookies.txt written from environment variable")
 
 def get_video_id(url):
     """Extract video ID from any YouTube URL format."""
@@ -51,6 +57,7 @@ def get_transcript_groq_whisper(video_id):
             'preferredcodec': 'mp3',
         }],
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
+        'cookiefile': 'cookies.txt',
         'quiet': True
     }
 
