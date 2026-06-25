@@ -9,8 +9,8 @@ from typing import List, Optional
 from pipeline import build_pipeline, build_multi_pipeline, get_video_id
 
 app = FastAPI(
-    title="PodcastGPT API",
-    description="Chat with any YouTube podcast using RAG",
+    title="NinjaPrep AI API",
+    description="Chat with any YouTube video, generate MCQs and study notes",
     version="1.0.0"
 )
 
@@ -58,7 +58,7 @@ def get_video_title(url: str) -> str:
 @app.get("/health")
 def health():
     """Check if API is running."""
-    return {"status": "ok", "message": "PodcastGPT API is running"}
+    return {"status": "ok", "message": "NinjaPrep AI API is running"}
 
 
 @app.get("/status")
@@ -79,14 +79,12 @@ def load_video(request: LoadRequest):
     try:
         video_id = get_video_id(request.url)
 
-        # Get video title
         print(f"Fetching title for {video_id}...")
         title = get_video_title(request.url)
 
         print(f"Loading video: {video_id} - {title}")
         chain = build_pipeline(request.url)
 
-        # Update session
         session["chain"] = chain
         session["urls"] = [request.url]
         session["video_ids"] = [video_id]
@@ -118,7 +116,6 @@ def load_multiple_videos(request: LoadMultiRequest):
         print(f"Loading {len(request.urls)} videos...")
         chain = build_multi_pipeline(request.urls)
 
-        # Get video IDs and titles
         video_ids = []
         titles = []
         for url in request.urls:
@@ -162,11 +159,9 @@ async def chat(request: ChatRequest):
 
     async def stream_response():
         try:
-            # Format chat history
             history_text = "\n".join(session["chat_history"][-10:])
-
-            # Stream response
             full_response = ""
+
             async for chunk in session["chain"].astream({
                 "question": request.question,
                 "chat_history": history_text
@@ -174,7 +169,6 @@ async def chat(request: ChatRequest):
                 full_response += chunk
                 yield chunk
 
-            # Save to history
             session["chat_history"].append(f"You: {request.question}")
             session["chat_history"].append(f"Bot: {full_response}")
 
@@ -183,6 +177,145 @@ async def chat(request: ChatRequest):
 
     return StreamingResponse(
         stream_response(),
+        media_type="text/plain"
+    )
+
+
+@app.post("/notes")
+async def generate_notes():
+    """Generate structured study notes from loaded video."""
+    if session["chain"] is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No video loaded. Please call /load first."
+        )
+
+    async def stream_notes():
+        try:
+            async for chunk in session["chain"].astream({
+                "question": """Generate comprehensive structured study notes from this lecture.
+                Format the notes as follows:
+                
+                # [Topic Title]
+                
+                ## Key Concepts
+                - List all main concepts covered
+                
+                ## Detailed Notes
+                - Cover each topic in detail
+                - Include definitions, formulas, and examples
+                
+                ## Important Points to Remember
+                - List the most important points for exam
+                
+                ## Summary
+                - Brief summary of the entire lecture
+                
+                Make the notes detailed, clear and exam-focused.""",
+                "chat_history": ""
+            }):
+                yield chunk
+
+        except Exception as e:
+            yield f"Error: {str(e)}"
+
+    return StreamingResponse(
+        stream_notes(),
+        media_type="text/plain"
+    )
+
+
+@app.post("/mcq")
+async def generate_mcq():
+    """Generate MCQs from loaded video."""
+    if session["chain"] is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No video loaded. Please call /load first."
+        )
+
+    async def stream_mcq():
+        try:
+            full_response = ""
+            async for chunk in session["chain"].astream({
+                "question": """Generate exactly 10 multiple choice questions from this lecture.
+
+                Return ONLY a valid JSON array, no other text, no markdown, in this exact format:
+                [
+                  {
+                    "id": 1,
+                    "question": "Question text here?",
+                    "options": {
+                      "A": "First option",
+                      "B": "Second option",
+                      "C": "Third option",
+                      "D": "Fourth option"
+                    },
+                    "correct": "A",
+                    "explanation": "Brief explanation why A is correct"
+                  }
+                ]
+
+                Rules:
+                - Questions must be based ONLY on the video content
+                - Each question must have exactly 4 options (A, B, C, D)
+                - Make questions exam-level difficulty
+                - Include explanation for correct answer
+                - Return ONLY the JSON array, no markdown, no extra text
+                - Do NOT wrap in code blocks""",
+                "chat_history": ""
+            }):
+                full_response += chunk
+                yield chunk
+
+        except Exception as e:
+            yield f"Error: {str(e)}"
+
+    return StreamingResponse(
+        stream_mcq(),
+        media_type="text/plain"
+    )
+
+
+@app.post("/flashcards")
+async def generate_flashcards():
+    """Generate flashcards from loaded video."""
+    if session["chain"] is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No video loaded. Please call /load first."
+        )
+
+    async def stream_flashcards():
+        try:
+            async for chunk in session["chain"].astream({
+                "question": """Generate exactly 15 flashcards from this lecture.
+
+                Return ONLY a valid JSON array, no other text, no markdown, in this exact format:
+                [
+                  {
+                    "id": 1,
+                    "front": "Question or term on front of card",
+                    "back": "Answer or definition on back of card"
+                  }
+                ]
+
+                Rules:
+                - Flashcards must be based ONLY on the video content
+                - Front should be a question or key term
+                - Back should be the answer or definition
+                - Make them useful for exam revision
+                - Return ONLY the JSON array, no markdown, no extra text
+                - Do NOT wrap in code blocks""",
+                "chat_history": ""
+            }):
+                yield chunk
+
+        except Exception as e:
+            yield f"Error: {str(e)}"
+
+    return StreamingResponse(
+        stream_flashcards(),
         media_type="text/plain"
     )
 
