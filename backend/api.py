@@ -7,6 +7,16 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from backend.pipeline import build_pipeline, build_multi_pipeline, get_video_id
+
+# Write cookies from env var at startup
+_cookies_content = os.getenv("YOUTUBE_COOKIES")
+if _cookies_content:
+    with open("cookies.txt", "w") as f:
+        f.write(_cookies_content)
+    print("✅ cookies.txt written from YOUTUBE_COOKIES env var")
+else:
+    print("⚠️ YOUTUBE_COOKIES env var not found")
+
 app = FastAPI(
     title="NinjaPrep AI API",
     description="Chat with any YouTube video, generate MCQs and study notes",
